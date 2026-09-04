@@ -1,0 +1,45 @@
+name: Build unsigned iOS IPA
+
+# AltStore が自分の Apple ID で再署名するため、ここでは一切署名しない。
+# よって証明書も Apple Developer Program（年99ドル）も不要。
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  build-ios:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          flutter-version: 3.47.2
+          cache: true
+
+      - run: flutter pub get
+
+      # iOS ビルドは10分近くかかるので、先に安いチェックで落とす。
+      - run: flutter analyze
+      - run: flutter test
+
+      # --no-codesign: 署名なしで Runner.app を生成する
+      - run: flutter build ios --release --no-codesign
+
+      # .ipa は「Payload/ に .app を入れて zip したもの」でしかない。
+      # -y は symlink を symlink のまま保存する（フレームワークが壊れないために必須）。
+      - name: Package unsigned IPA
+        run: |
+          cd build/ios/iphoneos
+          mkdir -p Payload
+          mv Runner.app Payload/
+          zip -qry FlashCard.ipa Payload
+          ls -lh FlashCard.ipa
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: FlashCard-ipa
+          path: build/ios/iphoneos/FlashCard.ipa
+          if-no-files-found: error
