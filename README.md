@@ -67,8 +67,11 @@ zip -qry FlashCard.ipa Payload
 ```
 
 `.ipa` は「`Payload/` に `.app` を入れて zip したもの」でしかない。
-`zip -y` は symlink を symlink のまま保存する指定で、これが無いと
-フレームワークの参照が壊れる。
+
+`zip -y`（symlink を symlink のまま保存）は付けてあるが、**iOS では実際には効いていない**。
+実際に焼いた .ipa を検証したところ symlink エントリは 0 個だった。iOS のフレームワークは
+フラット構造（`App.framework/App` が直に置かれる）で、`Versions/A` への symlink を使うのは
+macOS のフレームワーク形式だから。無害なので防御的に残しているが、iOS 向けでは必須ではない。
 
 パブリックリポジトリなので macOS ランナーは**回数無制限で無料**
 （プライベートだと課金係数10倍で、無料枠2000分は macOS 換算 月200分＝15〜20ビルド）。

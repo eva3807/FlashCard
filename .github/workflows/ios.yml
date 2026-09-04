@@ -5,6 +5,10 @@ name: Build unsigned iOS IPA
 on:
   push:
     branches: [main]
+    # ドキュメントだけの変更で10分のビルドを回さない。
+    paths-ignore:
+      - '**.md'
+      - 'LICENSE'
   workflow_dispatch:
 
 jobs:
