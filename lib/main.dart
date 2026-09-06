@@ -196,13 +196,17 @@ class _DeckScreenState extends State<DeckScreen> {
           body: !store.loaded
               ? const Center(child: CircularProgressIndicator())
               : Column(
+                  // 既定の center だと子が内容幅に縮められ、デッキ列が
+                  // 中央寄せになったうえチップのラベルが欠ける。
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
+                    // 高さを固定した横 ListView にチップを入れるのも不可
+                    //（高さを縛るとラベルが押し潰される）。高さは内容に決めさせる。
                     if (decks.length > 1)
-                      SizedBox(
-                        height: 52,
-                        child: ListView(
-                          scrollDirection: Axis.horizontal,
-                          padding: const EdgeInsets.symmetric(horizontal: 12),
+                      SingleChildScrollView(
+                        scrollDirection: Axis.horizontal,
+                        padding: const EdgeInsets.fromLTRB(12, 8, 12, 0),
+                        child: Row(
                           children: [
                             _DeckChip(
                               label: 'すべて',
@@ -307,15 +311,26 @@ class _DeckChip extends StatelessWidget {
   final bool selected;
   final VoidCallback onTap;
 
+  // ChoiceChip は使わない。Flutter web で日本語ラベルの幅を大きく過小に見積もり、
+  // 「すべて」が「す」まで切り詰められた。同じ文字列が AppBar・ListTile・
+  // FilledButton では正しく出るので Chip 固有の挙動。iOS で再現するかは未確認だが、
+  // 描画実績のあるボタンで組めば確実なので、そちらを使う。
   @override
   Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 8),
-      child: ChoiceChip(
-        label: Text('$label  $count'),
-        selected: selected,
-        onSelected: (_) => onTap(),
+    final style = ButtonStyle(
+      visualDensity: VisualDensity.compact,
+      shape: const WidgetStatePropertyAll(StadiumBorder()),
+      padding: const WidgetStatePropertyAll(
+        EdgeInsets.symmetric(horizontal: 16, vertical: 10),
       ),
+    );
+    final child = Text('$label  $count');
+
+    return Padding(
+      padding: const EdgeInsets.only(right: 8),
+      child: selected
+          ? FilledButton.tonal(onPressed: onTap, style: style, child: child)
+          : OutlinedButton(onPressed: onTap, style: style, child: child),
     );
   }
 }
