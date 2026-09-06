@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'import_screen.dart';
 import 'models.dart';
 import 'study_screen.dart';
 
@@ -42,14 +43,24 @@ class _FlashCardAppState extends State<FlashCardApp> {
   }
 }
 
-class DeckScreen extends StatelessWidget {
+class DeckScreen extends StatefulWidget {
   const DeckScreen({super.key, required this.store});
 
   final CardStore store;
 
+  @override
+  State<DeckScreen> createState() => _DeckScreenState();
+}
+
+class _DeckScreenState extends State<DeckScreen> {
+  /// null は「すべて」。
+  String? _deck;
+
   Future<void> _edit(BuildContext context, {Flashcard? card}) async {
     final frontCtrl = TextEditingController(text: card?.front ?? '');
     final backCtrl = TextEditingController(text: card?.back ?? '');
+    final deckCtrl =
+        TextEditingController(text: card?.deck ?? _deck ?? '未分類');
 
     final ok = await showDialog<bool>(
       context: context,
@@ -79,6 +90,14 @@ class DeckScreen extends StatelessWidget {
                   border: OutlineInputBorder(),
                 ),
               ),
+              const SizedBox(height: 12),
+              TextField(
+                controller: deckCtrl,
+                decoration: const InputDecoration(
+                  labelText: 'デッキ（科目名など）',
+                  border: OutlineInputBorder(),
+                ),
+              ),
             ],
           ),
         ),
@@ -98,31 +117,78 @@ class DeckScreen extends StatelessWidget {
     if (ok != true) return;
     final front = frontCtrl.text.trim();
     final back = backCtrl.text.trim();
+    final deck = deckCtrl.text.trim();
     if (front.isEmpty) return;
 
     if (card == null) {
-      await store.add(front, back);
+      await widget.store.add(front, back, deck: deck.isEmpty ? '未分類' : deck);
     } else {
-      await store.update(card.id, front, back);
+      await widget.store.update(card.id, front, back, deck: deck);
     }
+  }
+
+  Future<void> _confirmReset(BuildContext context) async {
+    final scope = _deck ?? 'すべてのデッキ';
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('学習の進捗をリセット'),
+        content: Text(
+          '$scope の復習間隔と成績を初期化します。\n'
+          'カードそのものは消えません。',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('キャンセル'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('リセット'),
+          ),
+        ],
+      ),
+    );
+    if (ok == true) await widget.store.resetProgress(deck: _deck);
   }
 
   @override
   Widget build(BuildContext context) {
+    final store = widget.store;
     return AnimatedBuilder(
       animation: store,
       builder: (context, _) {
-        final cards = store.cards;
+        final now = DateTime.now();
+        final decks = store.decks;
+
+        // 選んでいたデッキが空になったら「すべて」に戻す。
+        if (_deck != null && !decks.contains(_deck)) _deck = null;
+
+        final cards = _deck == null
+            ? store.cards
+            : store.cards.where((c) => c.deck == _deck).toList();
+        final due = store.dueCount(now, deck: _deck);
+
         return Scaffold(
           appBar: AppBar(
             title: const Text('暗記カード'),
             actions: [
+              IconButton(
+                tooltip: '取り込み',
+                icon: const Icon(Icons.upload_file),
+                onPressed: () => Navigator.of(context).push(
+                  MaterialPageRoute(
+                    builder: (_) =>
+                        ImportScreen(store: store, initialDeck: _deck),
+                  ),
+                ),
+              ),
               PopupMenuButton<String>(
                 onSelected: (v) {
-                  if (v == 'reset') store.resetStats();
+                  if (v == 'reset') _confirmReset(context);
                 },
                 itemBuilder: (_) => const [
-                  PopupMenuItem(value: 'reset', child: Text('成績をリセット')),
+                  PopupMenuItem(value: 'reset', child: Text('学習の進捗をリセット')),
                 ],
               ),
             ],
@@ -131,18 +197,45 @@ class DeckScreen extends StatelessWidget {
               ? const Center(child: CircularProgressIndicator())
               : Column(
                   children: [
+                    if (decks.length > 1)
+                      SizedBox(
+                        height: 52,
+                        child: ListView(
+                          scrollDirection: Axis.horizontal,
+                          padding: const EdgeInsets.symmetric(horizontal: 12),
+                          children: [
+                            _DeckChip(
+                              label: 'すべて',
+                              count: store.cards.length,
+                              selected: _deck == null,
+                              onTap: () => setState(() => _deck = null),
+                            ),
+                            for (final d in decks)
+                              _DeckChip(
+                                label: d,
+                                count:
+                                    store.cards.where((c) => c.deck == d).length,
+                                selected: _deck == d,
+                                onTap: () => setState(() => _deck = d),
+                              ),
+                          ],
+                        ),
+                      ),
                     Padding(
-                      padding: const EdgeInsets.fromLTRB(16, 8, 16, 4),
+                      padding: const EdgeInsets.fromLTRB(16, 4, 16, 4),
                       child: FilledButton.icon(
-                        onPressed: cards.isEmpty
+                        onPressed: due == 0
                             ? null
                             : () => Navigator.of(context).push(
                                   MaterialPageRoute(
-                                    builder: (_) => StudyScreen(store: store),
+                                    builder: (_) =>
+                                        StudyScreen(store: store, deck: _deck),
                                   ),
                                 ),
                         icon: const Icon(Icons.school),
-                        label: Text('学習を始める（${cards.length}枚）'),
+                        label: Text(
+                          due == 0 ? '今日ぶんは終わっています' : '復習する（$due枚）',
+                        ),
                         style: FilledButton.styleFrom(
                           minimumSize: const Size.fromHeight(52),
                         ),
@@ -150,7 +243,8 @@ class DeckScreen extends StatelessWidget {
                     ),
                     Expanded(
                       child: cards.isEmpty
-                          ? const Center(child: Text('右下の + でカードを追加'))
+                          ? const Center(
+                              child: Text('右上の取り込み、または + でカードを追加'))
                           : ListView.builder(
                               padding: const EdgeInsets.only(bottom: 88),
                               itemCount: cards.length,
@@ -181,7 +275,7 @@ class DeckScreen extends StatelessWidget {
                                       maxLines: 1,
                                       overflow: TextOverflow.ellipsis,
                                     ),
-                                    trailing: _AccuracyChip(card: c),
+                                    trailing: _DueChip(card: c, now: now),
                                     onTap: () => _edit(context, card: c),
                                   ),
                                 );
@@ -200,28 +294,64 @@ class DeckScreen extends StatelessWidget {
   }
 }
 
-class _AccuracyChip extends StatelessWidget {
-  const _AccuracyChip({required this.card});
+class _DeckChip extends StatelessWidget {
+  const _DeckChip({
+    required this.label,
+    required this.count,
+    required this.selected,
+    required this.onTap,
+  });
 
-  final Flashcard card;
+  final String label;
+  final int count;
+  final bool selected;
+  final VoidCallback onTap;
 
   @override
   Widget build(BuildContext context) {
-    if (card.accuracy < 0) {
-      return Text(
-        '未',
-        style: TextStyle(color: Theme.of(context).colorScheme.outline),
-      );
-    }
-    final pct = (card.accuracy * 100).round();
-    final color = pct >= 80
-        ? Colors.green
-        : pct >= 50
-            ? Colors.orange
-            : Theme.of(context).colorScheme.error;
-    return Text(
-      '$pct%',
-      style: TextStyle(color: color, fontWeight: FontWeight.bold),
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 8),
+      child: ChoiceChip(
+        label: Text('$label  $count'),
+        selected: selected,
+        onSelected: (_) => onTap(),
+      ),
     );
+  }
+}
+
+/// 一覧の右端。次にいつ復習するかを出す。
+/// 学習状態は「正答率」より「次の期日」の方が行動に直結する。
+class _DueChip extends StatelessWidget {
+  const _DueChip({required this.card, required this.now});
+
+  final Flashcard card;
+  final DateTime now;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+
+    if (card.isNew) {
+      return Text('新規',
+          style: theme.textTheme.labelMedium
+              ?.copyWith(color: theme.colorScheme.primary));
+    }
+    if (card.isDue(now)) {
+      return Text('今日',
+          style: theme.textTheme.labelMedium?.copyWith(
+              color: theme.colorScheme.error, fontWeight: FontWeight.bold));
+    }
+    final days = DateTime(card.due.year, card.due.month, card.due.day)
+        .difference(DateTime(now.year, now.month, now.day))
+        .inDays;
+    final label = days < 30
+        ? '$days日後'
+        : days < 365
+            ? '${(days / 30).toStringAsFixed(0)}か月後'
+            : '${(days / 365).toStringAsFixed(1)}年後';
+    return Text(label,
+        style: theme.textTheme.labelMedium
+            ?.copyWith(color: theme.colorScheme.outline));
   }
 }
