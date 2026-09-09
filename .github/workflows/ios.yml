@@ -60,12 +60,13 @@ jobs:
       - name: Publish the IPA as a release asset
         env:
           GH_TOKEN: ${{ github.token }}
+        # --notes は1行に収めること。YAML のブロックスカラーは字下げが浅い行で
+        # 終わるので、途中に空行や行頭から始まる行を入れると run がそこで切れる。
+        # （切れても yaml パーサは通ってしまい、GitHub 側で初めて弾かれる）
         run: |
           gh release create "build-${{ github.run_number }}" \
             build/ios/iphoneos/FlashCard.ipa \
             --repo "${{ github.repository }}" \
             --title "FlashCard build ${{ github.run_number }}" \
-            --notes "署名なし .ipa。AltStore / AltServer が自分の Apple ID で再署名して入れる。
-
-コミット: ${{ github.sha }}" \
+            --notes "署名なし .ipa（コミット ${{ github.sha }}）。AltStore / AltServer が本人の Apple ID で再署名して入れる。" \
             --latest
