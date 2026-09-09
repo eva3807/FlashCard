@@ -44,6 +44,25 @@ jobs:
           cd build/ios/iphoneos
           mkdir -p Payload
           mv Runner.app Payload/
+
+          # Flutter.framework comes out of the build with 0700 directories and a
+          # 0600 Info.plist, while everything else is 0755/0644. zip preserves
+          # Unix modes, so those permissions end up inside the .ipa, and iOS
+          # reads the extracted bundle as a different user than the one that
+          # wrote it -- anything not world-readable breaks the install.
+          echo "--- before ---"
+          find Payload ! -perm -044 -exec ls -ld {} + || true
+          chmod -R u+rwX,go+rX,go-w Payload
+
+          # Fail loudly rather than shipping an .ipa that cannot be installed.
+          if [ -n "$(find Payload ! -perm -044)" ]; then
+            echo "still world-unreadable after chmod:"
+            find Payload ! -perm -044 -exec ls -ld {} +
+            exit 1
+          fi
+          # The main executable must stay executable.
+          test -x Payload/Runner.app/Runner || { echo "Runner is not executable"; exit 1; }
+
           zip -qry FlashCard.ipa Payload
           ls -lh FlashCard.ipa
 
