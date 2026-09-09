@@ -11,6 +11,10 @@ on:
       - 'LICENSE'
   workflow_dispatch:
 
+# Release を作るために必要。
+permissions:
+  contents: write
+
 jobs:
   build-ios:
     runs-on: macos-latest
@@ -33,7 +37,8 @@ jobs:
       - run: flutter build ios --release --no-codesign
 
       # .ipa は「Payload/ に .app を入れて zip したもの」でしかない。
-      # -y は symlink を symlink のまま保存する（フレームワークが壊れないために必須）。
+      # zip の -y（symlink 保存）は iOS では実質不要（フレームワークがフラット構造で
+      # symlink を含まない）だが、無害なので防御的に付けてある。
       - name: Package unsigned IPA
         run: |
           cd build/ios/iphoneos
@@ -47,3 +52,20 @@ jobs:
           name: FlashCard-ipa
           path: build/ios/iphoneos/FlashCard.ipa
           if-no-files-found: error
+
+      # Actions のアーティファクトは GitHub にログインしないと落とせず、90日で消える。
+      # Release のアセットにすると「ログイン不要・期限なし・固定URL」になり、
+      # iPhone の Safari から直接ダウンロードして AltStore に渡せる。
+      #   https://github.com/<owner>/<repo>/releases/latest/download/FlashCard.ipa
+      - name: Publish the IPA as a release asset
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "build-${{ github.run_number }}" \
+            build/ios/iphoneos/FlashCard.ipa \
+            --repo "${{ github.repository }}" \
+            --title "FlashCard build ${{ github.run_number }}" \
+            --notes "署名なし .ipa。AltStore / AltServer が自分の Apple ID で再署名して入れる。
+
+コミット: ${{ github.sha }}" \
+            --latest
